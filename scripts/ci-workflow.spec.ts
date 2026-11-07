@@ -1115,6 +1115,33 @@ describe('bubblewrap preparation script', () => {
 })
 
 describe('DeepSeek e2e workflow', () => {
+  it('accepts only workflow_dispatch and keeps the missing-key preflight', () => {
+    const workflow = loadWorkflow('.github/workflows/e2e.yml')
+    if (!isRecord(workflow.on)) throw new TypeError('e2e workflow must define on')
+    expect(Object.keys(workflow.on)).toEqual(['workflow_dispatch'])
+    expect(workflow.on).not.toHaveProperty('pull_request')
+    expect(workflow.on).not.toHaveProperty('pull_request_target')
+    expect(workflow.on).not.toHaveProperty('push')
+    expect(workflow.on).not.toHaveProperty('schedule')
+
+    const e2e = workflowJob(workflow, 'e2e')
+    if (!Array.isArray(e2e.steps)) throw new TypeError('DeepSeek e2e workflow must define steps')
+    const steps = e2e.steps.filter(isRecord)
+    const preflight = steps.find(step => step.name === 'Preflight (require DEEPSEEK_API_KEY)')
+    const tests = steps.find(step => step.name === 'E2E tests (real DeepSeek API)')
+    expect(preflight).toMatchObject({
+      env: { DEEPSEEK_API_KEY: '${{ secrets.DEEPSEEK_API_KEY_EXTERNAL }}' },
+    })
+    expect(tests).toMatchObject({
+      env: { DEEPSEEK_API_KEY: '${{ secrets.DEEPSEEK_API_KEY_EXTERNAL }}' },
+    })
+    if (typeof preflight?.run !== 'string') throw new TypeError('preflight must run a script')
+    expect(preflight.run).toContain('if [ -z "${DEEPSEEK_API_KEY:-}" ]; then')
+    expect(preflight.run).toContain('::error::DEEPSEEK_API_KEY is empty')
+    expect(preflight.run).toContain('Configure the repo secret DEEPSEEK_API_KEY_EXTERNAL.')
+    expect(preflight.run).toContain('exit 1')
+  })
+
   it('prepares bubblewrap from the pinned payload without a package transaction', () => {
     const workflow = loadWorkflow('.github/workflows/e2e.yml')
     const e2e = workflowJob(workflow, 'e2e')
